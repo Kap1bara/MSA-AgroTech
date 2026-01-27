@@ -1,0 +1,94 @@
+@startuml C4_Code_HealthService
+title C4 Code - Health Service (Java/Kotlin) with Outbox
+
+package "health_service" {
+
+  package "api" {
+    class HealthBatchController {
+      +POST /sync/health(batch: HealthBatchDto): AckDto
+      +GET /health/status(penId: string): StatusDto
+    }
+  }
+
+  package "application" {
+    class ApplyHealthBatch {
+      +batchId: string
+      +events: List<HealthSignalDto>
+    }
+
+    class HealthBatchHandler {
+      +Handle(cmd: ApplyHealthBatch): void
+    }
+  }
+
+  package "domain" {
+    class AnimalId
+    class PenId
+
+    class AnimalHealthAggregate {
+      +Apply(signal: HealthSignal): void
+      +PullDomainEvents(): List<DomainEvent>
+    }
+
+    class HealthSignal
+
+    abstract class DomainEvent
+    class HealthDegradedEvent extends DomainEvent
+    class AnimalDeadEvent extends DomainEvent
+  }
+
+  package "persistence" {
+    interface AnimalHealthRepository {
+      +Find(id: AnimalId): AnimalHealthAggregate
+      +Save(a: AnimalHealthAggregate): void
+    }
+
+    class JdbcAnimalHealthRepository implements AnimalHealthRepository
+  }
+
+  package "outbox" {
+    class OutboxRecord {
+      +id: string
+      +type: string
+      +payload: string
+      +createdAt: Instant
+      +sentAt: Instant
+    }
+
+    interface OutboxRepository {
+      +SaveAll(r: List<OutboxRecord>): void
+      +FindUnsent(limit: int): List<OutboxRecord>
+      +MarkSent(ids: List<String>): void
+    }
+
+    class EventMapper {
+      +ToOutbox(e: DomainEvent): OutboxRecord
+    }
+
+    class OutboxDispatcher {
+      +RunOnce(): void
+    }
+
+    interface EventPublisher {
+      +Publish(r: OutboxRecord): void
+    }
+
+    class KafkaPublisher implements EventPublisher
+  }
+
+  package "integration" {
+    class ErpAdapter {
+      +SendHealthUpdate(dto: ErpHealthDto): void
+    }
+  }
+
+  api.HealthBatchController --> application.HealthBatchHandler
+  application.HealthBatchHandler --> persistence.AnimalHealthRepository
+  application.HealthBatchHandler --> domain.AnimalHealthAggregate : apply()
+  domain.AnimalHealthAggregate --> outbox.EventMapper : domain events
+  outbox.EventMapper --> outbox.OutboxRepository : save (same tx)
+  outbox.OutboxDispatcher --> outbox.OutboxRepository : poll unsent
+  outbox.OutboxDispatcher --> outbox.EventPublisher : publish
+  api.HealthBatchController --> integration.ErpAdapter
+}
+@enduml

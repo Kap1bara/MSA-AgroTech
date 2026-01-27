@@ -1,0 +1,151 @@
+@startuml C3_Животноводство_Финальная
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title C3 - Components (Edge + Central, batch sync)
+
+System_Boundary(животноводство, "Система мониторинга животноводства") {
+
+  System_Boundary(edge_агент, "Фермерский агент") {
+
+    Container(видеоаналитика, "Видеоаналитика", "C++", "Локальная обработка видеопотоков") {
+      Component(video_capture, "Video Capture", "C++", "RTSP ingest")
+      Component(frame_processor, "Frame Processor", "C++", "Frame preprocessing")
+      Component(detectors, "Detectors", "C++", "Event detection")
+      Component(ml_inference, "ML Inference Engine", "Partner SDK (C++)", "Local inference using partner model")
+      Component(video_event_pub, "Video Event Publisher", "C++", "Publish video events to queue")
+    }
+
+    Container(управление_оборудованием, "Управление оборудованием", "Go", "Кормушки, поилки, датчики") {
+      Component(eq_drivers, "Device Drivers", "Go", "Modbus/LoRaWAN drivers")
+      Component(eq_state_mgr, "State Manager", "Go", "Equipment state")
+      Component(eq_event_pub, "Equipment Event Publisher", "Go", "Publish equipment events to queue")
+    }
+
+    Container(gsm_шлюз, "GSM шлюз", "Go", "SMS и звонки") {
+      Component(gsm_consumer, "Queue Consumer", "Go", "Consume critical events")
+      Component(gsm_sender, "SMS/Call Sender", "Go", "Send SMS/calls")
+    }
+
+    Container(агент_синхронизации, "Агент синхронизации", "Go", "Batch синхронизация") {
+      Component(sync_scheduler, "Sync Scheduler", "Go", "Periodic sync trigger")
+      Component(sync_batch_builder, "Batch Builder", "Go", "Build batch for upload")
+      Component(sync_http_client, "HTTP Client", "Go", "Upload batch over HTTPS")
+      Component(sync_state_mgr, "Sync State Manager", "Go", "Track sent events")
+      Component(outbox_writer, "Queue Consumer", "Go", "Outbox writer")
+
+    }
+
+    ComponentQueue(локальная_очередь, "RabbitMQ", "Локальная очередь")
+    ComponentDb(локальная_бд, "SQLite", "События и конфигурации")
+  }
+
+  System_Boundary(центр, "Центральный сервер") {
+
+    Container(sync_gateway, "Sync Gateway", "Go/REST", "Прием batch от ферм") {
+      Component(gw_auth, "Authentication", "Go", "Agent authentication")
+      Component(gw_validator, "Validator", "Go", "Batch validation")
+      Component(gw_receiver, "Batch Receiver", "Go", "Forward to Event Processor")
+    }
+
+    Container(обработчик_событий, "Event Processor", "Go", "Нормализация и дедупликация") {
+      Component(ep_normalizer, "Normalizer", "Go", "Canonical model mapping")
+      Component(ep_dedup, "Deduplicator", "Go", "Idempotency and dedup")
+      Component(ep_router, "Router", "Go", "Route to domain services")
+    }
+
+    Container(health_service, "Health Service", "Java/Kotlin", "Домен здоровья") {
+      Component(hs_api, "Application API", "Java/Kotlin", "Health application entrypoint")
+      Component(hs_domain, "Domain Model", "Java/Kotlin", "Health aggregates and rules")
+      Component(hs_repo, "Repository", "Java/Kotlin", "Health persistence")
+      Component(hs_outbox, "Outbox/Publisher", "Java/Kotlin", "Commit-safe integration publishing")
+      Component(hs_erp_adapter, "ERP Adapter", "Java/Kotlin", "ERP integration")
+    }
+
+    Container(feed_service, "Feed Service", "Java/Kotlin", "Домен кормления") {
+      Component(fs_api, "Application API", "Java/Kotlin", "Feed application entrypoint")
+      Component(fs_domain, "Domain Model", "Java/Kotlin", "Feed aggregates and rules")
+      Component(fs_repo, "Repository", "Java/Kotlin", "Feed persistence")
+      Component(fs_outbox, "Outbox/Publisher", "Java/Kotlin", "Commit-safe integration publishing")
+      Component(fs_erp_adapter, "ERP Adapter", "Java/Kotlin", "ERP integration")
+    }
+
+    ComponentDb(health_db, "Health DB", "PostgreSQL", "Health data")
+    ComponentDb(feed_db, "Feed DB", "PostgreSQL", "Feed data")
+
+    Container(api_gateway, "API Gateway", "Kong", "Точка входа")
+  }
+}
+
+System_Ext(камеры, "Камеры", "RTSP")
+System_Ext(кормушки_поилки, "Кормушки/поилки", "Modbus")
+System_Ext(датчики, "Датчики", "LoRaWAN")
+System_Ext(gsm_сеть, "GSM сеть", "Сотовая связь")
+
+System_Ext(web, "Web Portal", "React")
+System_Ext(mobile, "Mobile App", "Flutter")
+
+System_Ext(kafka, "Kafka", "Корпоративная шина")
+System_Ext(erp, "ERP (1С:Агро)", "Учетная система")
+
+Rel(камеры, video_capture, "RTSP", "RTSP")
+Rel(кормушки_поилки, eq_drivers, "Modbus", "Modbus")
+Rel(датчики, eq_drivers, "LoRaWAN", "LoRaWAN")
+
+Rel(video_capture, frame_processor, "frames")
+Rel(frame_processor, detectors, "processed frames")
+Rel(detectors, ml_inference, "inference", "C++ API")
+Rel(ml_inference, detectors, "results", "C++ API")
+Rel(detectors, video_event_pub, "events")
+Rel(video_event_pub, локальная_очередь, "publish", "AMQP")
+
+Rel(eq_drivers, eq_state_mgr, "updates")
+Rel(eq_state_mgr, eq_event_pub, "events")
+Rel(eq_event_pub, локальная_очередь, "publish", "AMQP")
+
+Rel(локальная_очередь, gsm_consumer, "critical events", "AMQP")
+Rel(gsm_consumer, gsm_sender, "notify")
+Rel(gsm_sender, gsm_сеть, "SMS/call", "GSM")
+
+Rel(sync_scheduler, sync_batch_builder, "trigger")
+Rel(локальная_очередь, outbox_writer, "events", "AMQP")
+Rel(sync_batch_builder, локальная_бд, "read", "SQL")
+Rel(sync_batch_builder, sync_http_client, "batch")
+Rel(sync_http_client, sync_state_mgr, "update status")
+Rel(sync_state_mgr, локальная_бд, "write status", "SQL")
+Rel(outbox_writer, локальная_бд, "write event", "SQL")
+
+Rel(sync_http_client, gw_auth, "HTTPS batch", "HTTPS/REST")
+
+Rel(gw_auth, gw_validator, "auth ok")
+Rel(gw_validator, gw_receiver, "batch ok")
+Rel(gw_receiver, ep_normalizer, "batch")
+Rel(ep_normalizer, ep_dedup, "normalized")
+Rel(ep_dedup, ep_router, "deduplicated")
+
+Rel(ep_router, hs_api, "health batch", "HTTP")
+Rel(ep_router, fs_api, "feed batch", "HTTP")
+
+Rel(hs_api, hs_domain, "commands")
+Rel(hs_domain, hs_repo, "state changes")
+Rel(hs_repo, health_db, "CRUD", "JDBC")
+Rel(hs_domain, hs_outbox, "domain events")
+Rel(hs_outbox, kafka, "integration events", "Kafka")
+Rel(hs_api, hs_erp_adapter, "sync data")
+Rel(hs_erp_adapter, erp, "REST", "REST")
+
+Rel(fs_api, fs_domain, "commands")
+Rel(fs_domain, fs_repo, "state changes")
+Rel(fs_repo, feed_db, "CRUD", "JDBC")
+Rel(fs_domain, fs_outbox, "domain events")
+Rel(fs_outbox, kafka, "integration events", "Kafka")
+Rel(fs_api, fs_erp_adapter, "sync data")
+Rel(fs_erp_adapter, erp, "REST", "REST")
+
+Rel(web, api_gateway, "HTTPS", "HTTPS")
+Rel(mobile, api_gateway, "HTTPS", "HTTPS")
+
+Rel(api_gateway, health_service, "REST", "HTTPS/REST")
+Rel(api_gateway, feed_service, "REST", "HTTPS/REST")
+Rel(api_gateway, sync_gateway, "Admin", "HTTPS/REST")
+
+@enduml

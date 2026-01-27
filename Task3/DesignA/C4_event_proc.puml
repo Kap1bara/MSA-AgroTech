@@ -1,0 +1,55 @@
+@startuml C4_Code_SyncGateway_EventProcessor
+title C4 Code - Sync Gateway (Go/REST) + Event Processor (Go)
+
+package "sync_gateway" {
+
+  class Authenticator {
+    +Authenticate(req Request): (Principal, error)
+  }
+
+  class BatchValidator {
+    +Validate(batch Batch): error
+  }
+
+  class BatchReceiver {
+    +Receive(req Request): (Batch, error)
+  }
+
+  class Forwarder {
+    +Forward(batch Batch): error
+  }
+
+  BatchReceiver --> Authenticator
+  Authenticator --> BatchValidator
+  BatchValidator --> Forwarder
+}
+
+package "event_processor" {
+
+  class Normalizer {
+    +Normalize(batch Batch): ([]CanonicalEvent, error)
+  }
+
+  class Deduplicator {
+    +Filter(events []CanonicalEvent): ([]CanonicalEvent, error)
+  }
+
+  class Router {
+    +Route(events []CanonicalEvent): RoutedBatches
+  }
+
+  class HealthClient {
+    +Send(batch HealthBatch): error
+  }
+
+  class FeedClient {
+    +Send(batch FeedBatch): error
+  }
+
+  Forwarder --> Normalizer : forward batch
+  Normalizer --> Deduplicator
+  Deduplicator --> Router
+  Router --> HealthClient : health batch (HTTP)
+  Router --> FeedClient : feed batch (HTTP)
+}
+@enduml

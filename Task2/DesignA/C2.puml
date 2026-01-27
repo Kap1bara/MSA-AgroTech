@@ -1,0 +1,81 @@
+@startuml C2_Животноводство_Упрощенная
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Контейнерная диаграмма C2 — Упрощенный и надежный модуль
+
+System_Boundary(животноводство, "Система мониторинга животноводства") {
+
+    Container_Boundary(edge_агент, "Фермерский агент") {
+        Container(видеоаналитика, "Видеоаналитика", "C++", "Локальная обработка видеопотоков")
+        Container(управление_оборудованием, "Управление оборудованием", "Go", "Кормушки, поилки, датчики")
+
+        Container(gsm_шлюз, "GSM/GPRS шлюз", "Go", "Прямая отправка SMS/звонков через сотовую сеть")
+        Container(агент_синхронизации, "Агент синхронизации", "Go", "Вся связь с центром через этот компонент")
+
+        ContainerDb(локальная_бд, "Локальная БД", "SQLite", "События, конфигурации")
+        ContainerQueue(локальная_очередь, "Локальная очередь", "RabbitMQ", "Внутренняя коммуникация")
+    }
+
+    Container_Boundary(центральный_сервер, "Центральные сервер") {
+        Container(sync_gateway, "Сервис синхронизации", "Go/REST", "Единая точка приема данных от edge-агентов с аутентификацией и валидацией")
+        Container(обработчик_событий, "Обработчик событий", "Go", "Нормализация, дедупликация и агрегация данных от ферм")
+
+        Container(health_service, "Health Service", "Java/Kotlin", "Домен: расчёты состояния животного")
+        Container(feed_service, "Feed Service", "Java/Kotlin", "Домен: расчёты кормления и расхода")
+
+        ContainerDb(health_db, "База данных (health)", "PostgreSQL", "Данные по здоровью")
+        ContainerDb(feed_db, "База данных (feed)", "PostgreSQL", "Данные по кормам")
+
+        Container(api_gateway, "API Gateway", "Kong", "Точка входа")
+    }
+}
+
+System_Ext(gsm_сеть, "GSM сеть", "Сотовая связь")
+System_Ext(веб_портал, "Веб-портал", "React")
+System_Ext(мобильное_приложение, "Мобильное приложение", "Flutter")
+System_Ext(kafka, "Корпоративная шина", "Apache Kafka")
+System_Ext(erp, "ERP система", "1С:Агро")
+System_Ext(камеры, "Камеры", "RTSP")
+System_Ext(кормушки, "Кормушки/поилки", "Modbus")
+System_Ext(датчики, "Датчики", "LoRaWAN")
+
+' --- Edge устройства ---
+Rel(камеры, видеоаналитика, "RTSP видеопоток", "RTSP")
+Rel(кормушки, управление_оборудованием, "Данные и управление", "Modbus")
+Rel(датчики, управление_оборудованием, "Данные с датчиков", "LoRaWAN")
+
+Rel(видеоаналитика, локальная_очередь, "События детекции", "AMQP")
+Rel(управление_оборудованием, локальная_очередь, "События оборудования", "AMQP")
+Rel(локальная_очередь, gsm_шлюз, "Критические события для SMS/звонков", "AMQP")
+Rel(локальная_очередь, агент_синхронизации, "Все события для синхронизации", "AMQP")
+Rel(агент_синхронизации, локальная_бд, "Локальные записи и кэширование конфигураций", "SQL")
+
+Rel(gsm_шлюз, gsm_сеть, "SMS и звонки", "GSM")
+
+' --- Edge → Центр ---
+Rel(агент_синхронизации, sync_gateway, "Синхронизация данных (batch)", "HTTPS/REST")
+
+' --- Центр: маршрутизация и домены ---
+Rel(sync_gateway, обработчик_событий, "Проверенные данные", "HTTP")
+Rel(обработчик_событий, health_service, "Предобработанные данные (health)", "HTTP")
+Rel(обработчик_событий, feed_service, "Предобработанные данные (feed)", "HTTP")
+
+Rel(health_service, health_db, "Запись агрегатов/состояний", "JDBC")
+Rel(feed_service, feed_db, "Запись агрегатов/планов кормления", "JDBC")
+
+' --- Интеграции наружу ---
+Rel(health_service, kafka, "Публикация событий health", "Kafka")
+Rel(feed_service, kafka, "Публикация событий feed", "Kafka")
+
+Rel(health_service, erp, "Интеграция по health-данным", "REST")
+Rel(feed_service, erp, "Интеграция по данным кормов", "REST")
+
+' --- API слой ---
+Rel(веб_портал, api_gateway, "Данные и управление", "HTTPS")
+Rel(мобильное_приложение, api_gateway, "Данные и управление", "HTTPS")
+
+Rel(api_gateway, health_service, "API вызовы (health)", "HTTPS/REST")
+Rel(api_gateway, feed_service, "API вызовы (feed)", "HTTPS/REST")
+Rel(api_gateway, sync_gateway, "Администрирование/регистрация агентов", "HTTPS/REST")
+
+@enduml 
