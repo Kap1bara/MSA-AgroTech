@@ -1,0 +1,80 @@
+\@startuml C2_SaaS_SchemaPerTenant_Fixed
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title C2 - SaaS Variant A (Schema-per-tenant) - Control/Data Plane
+
+System_Ext(edge_agents, "Edge Agents", "Client farms (Video/Equipment/Sync)")
+System_Ext(payment_providers, "RU Payment Providers", "YooKassa, Sber, Tinkoff, CloudPayments")
+System_Ext(corporate_kafka, "Customer Corporate Kafka", "Optional client-side bus for integrations")
+
+System_Boundary(saas, "Livestock SaaS Platform") {
+
+  System_Boundary(control_plane, "Control Plane") {
+    Container(api_gateway, "Public API Gateway", "Kong", "Auth, tenant routing, rate limits")
+    Container(iam, "Identity Service", "OIDC/Keycloak", "OIDC, RBAC, tenant scope")
+
+    Container(tenant_service, "Tenant Service", "Java/Kotlin", "Tenant registry, routing metadata")
+    Container(subscription_service, "Subscription Service", "Java/Kotlin", "Plans, quotas, feature flags")
+    Container(billing_service, "Billing Service", "Java/Kotlin", "Invoices, payments, dunning")
+    Container(payment_adapter, "Payment Adapter", "Java/Kotlin", "Provider API + webhooks, idempotency")
+    Container(usage_metering, "Usage Metering", "Go", "Usage aggregation for billing")
+    Container(dev_portal, "Developer Portal", "Docusaurus/Backstage", "Docs, OpenAPI, onboarding")
+
+    ContainerDb(control_db, "Control DB", "PostgreSQL", "Tenants, users, plans, billing")
+  }
+
+  System_Boundary(data_plane, "Data Plane") {
+    Container(sync_gateway, "Sync Gateway", "Go/REST", "Batch intake from edge")
+    Container(event_processor, "Event Processor", "Go", "Normalize, dedup, route (tenant scoped)")
+    Container(health_service, "Health Service", "Java/Kotlin", "Health domain")
+    Container(feed_service, "Feed Service", "Java/Kotlin", "Feed domain")
+
+    Container(health_integration, "Health Integration Adapter", "Java/Kotlin", "Exports/webhooks to customer systems")
+    Container(feed_integration, "Feed Integration Adapter", "Java/Kotlin", "Exports/webhooks to customer systems")
+
+    ContainerDb(tenant_cluster, "Tenant Data Cluster", "PostgreSQL", "Shared cluster (schema-per-tenant)")
+    ContainerDb(schema_t1, "Tenant Schema", "schema: tenant_123", "Isolated tenant data")
+    ContainerDb(schema_t2, "Tenant Schema", "schema: tenant_456", "Isolated tenant data")
+  }
+}
+
+Rel(edge_agents, sync_gateway, "Batch sync", "HTTPS/REST")
+Rel(sync_gateway, event_processor, "Forward validated batch")
+Rel(event_processor, health_service, "Health events (tenant scoped)")
+Rel(event_processor, feed_service, "Feed events (tenant scoped)")
+
+Rel(api_gateway, iam, "Auth", "OIDC/JWT")
+Rel(api_gateway, tenant_service, "Resolve tenant, routing", "HTTPS/REST")
+Rel(api_gateway, subscription_service, "Check quotas/features", "HTTPS/REST")
+Rel(api_gateway, billing_service, "Billing APIs (self-service)", "HTTPS/REST")
+Rel(api_gateway, health_service, "Tenant APIs", "HTTPS/REST")
+Rel(api_gateway, feed_service, "Tenant APIs", "HTTPS/REST")
+
+Rel(dev_portal, api_gateway, "OpenAPI, onboarding flows", "HTTPS")
+
+Rel(tenant_service, control_db, "CRUD", "JDBC")
+Rel(subscription_service, control_db, "CRUD", "JDBC")
+Rel(billing_service, control_db, "CRUD", "JDBC")
+Rel(iam, control_db, "Users/tenants mapping", "JDBC")
+
+Rel(billing_service, payment_adapter, "Create/confirm payments", "HTTPS/REST")
+Rel(payment_adapter, payment_providers, "Provider API + webhooks", "HTTPS")
+Rel(usage_metering, billing_service, "Usage aggregates", "HTTPS/REST")
+Rel(subscription_service, usage_metering, "Quota model", "HTTPS/REST")
+
+Rel(health_service, tenant_cluster, "CRUD (tenant schema)", "JDBC")
+Rel(feed_service, tenant_cluster, "CRUD (tenant schema)", "JDBC")
+
+Rel(tenant_cluster, schema_t1, "Logical isolation")
+Rel(tenant_cluster, schema_t2, "Logical isolation")
+
+Rel(health_service, usage_metering, "Emit usage events", "HTTPS/REST")
+Rel(feed_service, usage_metering, "Emit usage events", "HTTPS/REST")
+Rel(sync_gateway, usage_metering, "Emit sync usage", "HTTPS/REST")
+
+Rel(health_integration, corporate_kafka, "Publish tenant events", "Kafka")
+Rel(feed_integration, corporate_kafka, "Publish tenant events", "Kafka")
+Rel(health_service, health_integration, "Domain export", "HTTPS/REST")
+Rel(feed_service, feed_integration, "Domain export", "HTTPS/REST")
+
+@enduml

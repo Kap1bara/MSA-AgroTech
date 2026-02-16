@@ -1,0 +1,38 @@
+@startuml C2_Example_AgroTechX_Tenant
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title C2 - Example: AgroTech X as SaaS Tenant
+
+System_Ext(agrotech_farms, "AgroTech X Farms", "Multiple farms with edge agents")
+System_Ext(agrotech_kafka, "AgroTech X Kafka", "Corporate bus (external)")
+System_Ext(agrotech_erp, "AgroTech X ERP (1C:Agro)", "Client ERP")
+
+System_Boundary(saas, "Livestock SaaS Platform") {
+  System_Boundary(data_plane, "Data Plane") {
+    Container(sync_gateway, "Sync Gateway", "Go/REST")
+    Container(event_processor, "Event Processor", "Go")
+    Container(health_service, "Health Service", "Java/Kotlin")
+    Container(feed_service, "Feed Service", "Java/Kotlin")
+    Container(health_integration, "Health Integration Adapter", "Java/Kotlin")
+    Container(feed_integration, "Feed Integration Adapter", "Java/Kotlin")
+  }
+
+  System_Boundary(control_plane, "Control Plane") {
+    Container(api_gateway, "Public API Gateway", "Kong")
+  }
+}
+
+Rel(agrotech_farms, sync_gateway, "Batch sync", "HTTPS/REST")
+Rel(sync_gateway, event_processor, "Forward batch")
+Rel(event_processor, health_service, "Health events")
+Rel(event_processor, feed_service, "Feed events")
+
+Rel(health_service, health_integration, "Export")
+Rel(feed_service, feed_integration, "Export")
+
+Rel(health_integration, agrotech_kafka, "Publish events/metrics", "Kafka")
+Rel(feed_integration, agrotech_kafka, "Publish events/metrics", "Kafka")
+Rel(health_integration, agrotech_erp, "REST export", "HTTPS/REST")
+Rel(feed_integration, agrotech_erp, "REST export", "HTTPS/REST")
+
+@enduml

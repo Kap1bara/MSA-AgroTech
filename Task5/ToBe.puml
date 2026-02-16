@@ -1,0 +1,21 @@
+@startuml C1_SaaS_ToBe
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title C1 - Livestock SaaS Platform (To-Be)
+
+Person(client_admin, "Client Admin", "Self-service, billing, keys")
+Person(client_operator, "Client Operator", "Monitoring")
+
+System(saas, "Livestock SaaS Platform", "Multi-tenant cloud platform")
+
+System_Ext(edge_agents, "Edge Agents", "Client farms (batch sync)")
+System_Ext(payment_providers, "RU Payment Providers", "YooKassa, Sber, Tinkoff, CloudPayments")
+System_Ext(corporate_kafka, "Customer Corporate Kafka", "Optional client bus for integrations")
+
+Rel(edge_agents, saas, "Batch sync")
+Rel(client_admin, saas, "Self-service")
+Rel(client_operator, saas, "Monitoring")
+Rel(saas, payment_providers, "Payments")
+Rel(saas, corporate_kafka, "Integration exports (optional)")
+
+@enduml

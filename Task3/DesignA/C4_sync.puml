@@ -1,0 +1,71 @@
+@startuml C4_Code_SyncAgent
+title C4 Code - Агент синхронизации (Go) + SQLite outbox
+
+package "sync_agent" {
+
+  package "outbox" {
+    class OutboxWriter {
+      +Run(): void
+    }
+
+    interface QueueConsumer {
+      +Consume(handler func(Event)): error
+    }
+
+    interface OutboxStore {
+      +Append(e Event): error
+    }
+  }
+
+  package "batch" {
+    class BatchBuilder {
+      +Build(limit int): (Batch, error)
+    }
+
+    interface OutboxReader {
+      +ReadUnsent(limit int): ([]Event, error)
+    }
+  }
+
+  package "sync" {
+    class SyncScheduler {
+      +Run(): void
+    }
+
+    class SyncStateManager {
+      +MarkSent(ids []string): error
+    }
+
+    interface SyncStateStore {
+      +MarkSent(ids []string): error
+    }
+  }
+
+  package "transport" {
+    class HttpClient {
+      +PostBatch(b Batch): (Ack, error)
+    }
+  }
+
+  package "storage" {
+    class SqliteStore implements outbox.OutboxStore, batch.OutboxReader, sync.SyncStateStore {
+      +Append(e Event): error
+      +ReadUnsent(limit int): ([]Event, error)
+      +MarkSent(ids []string): error
+    }
+  }
+
+  outbox.OutboxWriter --> outbox.QueueConsumer : consume
+  outbox.OutboxWriter --> outbox.OutboxStore : append
+
+  sync.SyncScheduler --> batch.BatchBuilder : trigger
+  batch.BatchBuilder --> batch.OutboxReader : read unsent
+  batch.BatchBuilder --> transport.HttpClient : upload
+  transport.HttpClient --> sync.SyncStateManager : ack
+  sync.SyncStateManager --> sync.SyncStateStore : mark sent
+
+  outbox.OutboxStore ..|> storage.SqliteStore
+  batch.OutboxReader <|.. storage.SqliteStore
+  sync.SyncStateStore <|.. storage.SqliteStore
+}
+@enduml

@@ -1,0 +1,74 @@
+@startuml C4_Code_VideoAnalytics
+title C4 Code - Видеоаналитика (C++)
+
+package "video_analytics" {
+
+  package "ingest" {
+    class RtspClient {
+      +Open(url: string): void
+      +Read(): Frame
+      +Close(): void
+    }
+
+    class VideoCapture {
+      -clients: vector<RtspClient>
+      +Start(urls: vector<string>): void
+      +NextFrame(): Frame
+    }
+  }
+
+  package "preprocess" {
+    class FrameProcessor {
+      +Preprocess(f: Frame): Frame
+    }
+  }
+
+  package "ml" {
+    interface InferenceEngine {
+      +Infer(f: Frame): InferenceResult
+    }
+
+    class PartnerSdkEngine implements InferenceEngine {
+      +LoadModel(path: string): void
+      +Infer(f: Frame): InferenceResult
+    }
+  }
+
+  package "detect" {
+    class Detectors {
+      -engine: InferenceEngine
+      +Detect(f: Frame): vector<EdgeEvent>
+    }
+
+    class EventMapper {
+      +Map(r: InferenceResult): vector<EdgeEvent>
+    }
+  }
+
+  package "publish" {
+    interface QueuePublisher {
+      +Publish(e: EdgeEvent): void
+      +PublishBatch(es: vector<EdgeEvent>): void
+    }
+
+    class AmqpPublisher implements QueuePublisher {
+      +Connect(amqpUrl: string): void
+      +Publish(e: EdgeEvent): void
+      +PublishBatch(es: vector<EdgeEvent>): void
+    }
+
+    class VideoEventPublisher {
+      -pub: QueuePublisher
+      +Publish(es: vector<EdgeEvent>): void
+    }
+  }
+
+  ingest.VideoCapture --> ingest.RtspClient
+  ingest.VideoCapture --> preprocess.FrameProcessor : frames
+  preprocess.FrameProcessor --> detect.Detectors : processed frames
+  detect.Detectors --> ml.InferenceEngine : infer()
+  detect.Detectors --> detect.EventMapper : map
+  detect.Detectors --> publish.VideoEventPublisher : events
+  publish.VideoEventPublisher --> publish.QueuePublisher : AMQP
+}
+@enduml
